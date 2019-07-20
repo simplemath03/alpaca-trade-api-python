@@ -6,6 +6,7 @@ from .entity import (
     Exchange, SymbolTypeMap, ConditionMap,
     Company, Dividends, Splits, Earnings, Financials, NewsList, Ticker
 )
+from alpaca_trade_api.common import get_polygon_credentials
 
 
 def _is_list_like(o):
@@ -15,6 +16,7 @@ def _is_list_like(o):
 class REST(object):
 
     def __init__(self, api_key, staging=False):
+        self._api_key = get_polygon_credentials(api_key)
         self._api_key = api_key
         self._staging = staging
         self._session = requests.Session()
@@ -77,12 +79,14 @@ class REST(object):
         return Aggs(raw)
 
     def historic_agg_v2(self, symbol, multiplier, timespan, _from, to,
-                        unadjusted=False):
+                        unadjusted=False, limit=None):
         path = '/aggs/ticker/{}/range/{}/{}/{}/{}'.format(
             symbol, multiplier, timespan, _from, to
         )
         params = {}
         params['unadjusted'] = unadjusted
+        if limit:
+            params['limit'] = limit
         raw = self.get(path, params, version='v2')
         return Aggsv2(raw)
 
