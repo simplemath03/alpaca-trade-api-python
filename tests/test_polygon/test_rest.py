@@ -1,3 +1,5 @@
+import datetime
+import pandas as pd
 from alpaca_trade_api.polygon import REST
 import pytest
 import requests_mock
@@ -11,7 +13,7 @@ def reqmock():
 
 def endpoint(path, params='', api_version='v1'):
     return 'https://api.polygon.io/{}{}?{}&apiKey=key-id'.format(
-      api_version, path, params
+        api_version, path, params
     )
 
 
@@ -54,177 +56,8 @@ def test_polygon(reqmock):
     tmap = cli.symbol_type_map()
     assert tmap.cs == 'Common Stock'
 
-    # Historic Trades
-    reqmock.get(
-        endpoint('/historic/trades/AAPL/2018-2-2') +
-        '&limit=100&offset=1000',
-        text='''
-{
-  "day": "2018-2-2",
-  "map": {
-    "c1": "condition1",
-    "c2": "condition2",
-    "c3": "condition3",
-    "c4": "condition4",
-    "e": "exchange",
-    "p": "price",
-    "s": "size",
-    "t": "timestamp"
-  },
-  "msLatency": 8,
-  "status": "success",
-  "symbol": "AAPL",
-  "ticks": [
-    {
-      "c1": 14,
-      "c2": 12,
-      "c3": 0,
-      "c4": 0,
-      "e": 12,
-      "p": 172.17,
-      "s": 50,
-      "t": 1517529601006
-    }
-  ]
-}''')
-
-    trades = cli.historic_trades('AAPL', '2018-2-2',
-                                 limit=100, offset=1000)
-    assert trades[0].price == 172.17
-    assert trades[0].timestamp.month == 2
-    assert len(trades) == 1
-    assert trades.df.iloc[0].price == 172.17
-
-    # Historic Quotes
-    reqmock.get(
-        endpoint('/historic/quotes/AAPL/2018-2-2') +
-        '&limit=100&offset=1000',
-        text='''
-{
-  "day": "2018-2-2",
-  "map": {
-    "aE": "askexchange",
-    "aP": "askprice",
-    "aS": "asksize",
-    "bE": "bidexchange",
-    "bP": "bidprice",
-    "bS": "bidsize",
-    "c": "condition",
-    "t": "timestamp"
-  },
-  "msLatency": 3,
-  "status": "success",
-  "symbol": "AAPL",
-  "ticks": [
-    {
-      "c": 0,
-      "bE": 11,
-      "aE": 12,
-      "aP": 173.15,
-      "bP": 173.13,
-      "bS": 25,
-      "aS": 55,
-      "t": 1517529601006
-    }
-  ]
-}''')
-
-    quotes = cli.historic_quotes('AAPL', '2018-2-2',
-                                 limit=100, offset=1000)
-    assert quotes[0].askprice == 173.15
-    assert quotes[0].timestamp.month == 2
-    assert len(quotes) == 1
-    assert quotes.df.iloc[0].bidprice == 173.13
-
-    with pytest.raises(AttributeError):
-        quotes[0].foo
-
-    # Historic Aggregates
-    reqmock.get(
-        endpoint('/historic/agg/minute/AAPL') +
-        '&from=2018-2-2&to=2018-2-5&limit=100',
-        text='''
-{
-  "map": {
-    "a": "average",
-    "c": "close",
-    "h": "high",
-    "l": "low",
-    "o": "open",
-    "t": "timestamp",
-    "v": "volume"
-  },
-  "status": "success",
-  "aggType": "min",
-  "symbol": "AAPL",
-  "ticks": [
-    {
-      "o": 173.15,
-      "c": 173.2,
-      "l": 173.15,
-      "h": 173.21,
-      "v": 1800,
-      "t": 1517529605000
-    }
-  ]
-}''')
-
-    aggs = cli.historic_agg('minute', 'AAPL',
-                            _from='2018-2-2',
-                            to='2018-2-5',
-                            limit=100)
-    assert aggs[0].open == 173.15
-    assert aggs[0].timestamp.day == 1
-    assert len(aggs) == 1
-    assert aggs.df.iloc[0].high == 173.21
-    with pytest.raises(AttributeError):
-        aggs[0].foo
-
-    reqmock.get(
-        endpoint('/historic/agg/day/AAPL') +
-        '&from=2018-2-2&to=2018-2-5&limit=100',
-        text='''
-{
-  "map": {
-    "a": "average",
-    "c": "close",
-    "h": "high",
-    "l": "low",
-    "o": "open",
-    "d": "day",
-    "v": "volume"
-  },
-  "status": "success",
-  "aggType": "day",
-  "symbol": "AAPL",
-  "ticks": [
-    {
-      "o": 173.15,
-      "c": 173.2,
-      "l": 173.15,
-      "h": 173.21,
-      "v": 1800,
-      "d": "2018-02-02"
-    }
-  ]
-}''')
-
-    aggs = cli.historic_agg('day', 'AAPL',
-                            _from='2018-2-2',
-                            to='2018-2-5',
-                            limit=100)
-    assert aggs[0].open == 173.15
-    assert aggs[0].day.day == 2
-    assert len(aggs) == 1
-    assert aggs.df.iloc[0].high == 173.21
-
-# Historic Aggregates V2
-    reqmock.get(
-        endpoint(
-          '/aggs/ticker/AAPL/range/1/day/2018-2-2/2018-2-5',
-          params='unadjusted=False', api_version='v2'
-        ),
-        text='''
+    # Historic Aggregates V2
+    aggs_response = '''
 {
   "ticker": "AAPL",
   "status": "OK",
@@ -241,18 +74,67 @@ def test_polygon(reqmock):
       "t": 1517529605000
     }
   ]
-}''')
+}'''
+
+    reqmock.get(
+        endpoint(
+            '/aggs/ticker/AAPL/range/1/day/2018-02-02/2018-02-05',
+            params='unadjusted=False', api_version='v2'
+        ),
+        text=aggs_response)
+
+    reqmock.get(
+        endpoint(
+            '/aggs/ticker/AAPL/range/1/day/1546300800000/2018-02-05',
+            params='unadjusted=False', api_version='v2'
+        ),
+        text=aggs_response)
 
     aggs = cli.historic_agg_v2(
-      'AAPL', 1, 'day',
-      _from='2018-2-2',
-      to='2018-2-5'
+        'AAPL', 1, 'day',
+        _from='2018-2-2',
+        to='2018-2-5'
     )
     assert aggs[0].open == 173.15
     assert len(aggs) == 1
     assert aggs.df.iloc[0].high == 173.21
     with pytest.raises(AttributeError):
         aggs[0].foo
+
+    # test different supported date formats, just make sure they are parsed
+    # correctly by the sdk. don't care about the response
+    cli.historic_agg_v2(
+        'AAPL', 1, 'day',
+        _from=datetime.datetime(2018, 2, 2),
+        to='2018-2-5'
+    )
+
+    # test different supported date formats
+    cli.historic_agg_v2(
+        'AAPL', 1, 'day',
+        _from=datetime.date(2018, 2, 2),
+        to='2018-2-5'
+    )
+
+    # test different supported date formats
+    cli.historic_agg_v2(
+        'AAPL', 1, 'day',
+        _from=pd.Timestamp('2018-2-2'),
+        to='2018-2-5'
+    )
+
+    cli.historic_agg_v2(
+        'AAPL', 1, 'day',
+        _from=pd.Timestamp('2019-01-01').timestamp()*1000,
+        to='2018-2-5'
+    )
+
+    with pytest.raises(Exception):
+        cli.historic_agg_v2(
+            'AAPL', 1, 'day',
+            _from="bad format",
+            to='2018-2-5'
+        )
 
     # Last Trade
     reqmock.get(
@@ -336,8 +218,8 @@ def test_polygon(reqmock):
 
     # Splits
     reqmock.get(
-        endpoint('/meta/symbols/AAPL/splits'),
-        text='''[{"forfactor": 1}]''',
+        endpoint('/reference/splits/AAPL', api_version='v2'),
+        text='''{"results": [{"forfactor": 1}]}''',
     )
     ret = cli.splits('AAPL')
     assert ret[0].forfactor == 1

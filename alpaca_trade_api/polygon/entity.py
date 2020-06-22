@@ -7,6 +7,10 @@ NY = 'America/New_York'
 class Entity(object):
     def __init__(self, raw):
         self._raw = raw
+        if 'from' in self._raw:
+            # can't use python keyword 'from'. if the api returns it,
+            # we switch it to _from, which is usable for the users.
+            self._raw['_from'] = self._raw['from']
 
     def __getattr__(self, key):
         if key in self._raw:
@@ -93,13 +97,14 @@ class Aggsv2(list):
 
     def rename_keys(self):
         colmap = {
-                "o": "open",
-                "h": "high",
-                "l": "low",
-                "c": "close",
-                "v": "volume",
-                "t": "timestamp",
-            }
+            "o": "open",
+            "h": "high",
+            "l": "low",
+            "c": "close",
+            "v": "volume",
+            "t": "timestamp",
+            "vw": "vwap",
+        }
 
         return [
             {colmap.get(k, k): v for k, v in tick.items()}
@@ -109,7 +114,8 @@ class Aggsv2(list):
     @property
     def df(self):
         if not hasattr(self, '_df'):
-            columns = ('timestamp', 'open', 'high', 'low', 'close', 'volume')
+            columns = ('timestamp', 'open', 'high', 'low', 'close',
+                       'volume', 'vwap')
             df = pd.DataFrame(
                 self.rename_keys(),
                 columns=columns
@@ -147,6 +153,10 @@ class _TradeOrQuote(object):
             val = self._raw[key]
             if key == 'timestamp':
                 return pd.Timestamp(val, tz=NY, unit='ms')
+            elif key in [
+                'sip_timestamp', 'participant_timestamp', 'trf_timestamp'
+            ]:
+                return pd.Timestamp(val, tz=NY, unit='ns')
             return val
         return getattr(super(), key)
 
@@ -156,14 +166,24 @@ class _TradesOrQuotes(object):
 
     def __init__(self, raw):
         def rename_keys(tick, map):
+            if type(map['t']) is dict:
+                # Must be a v2 response
+                return {
+                    map[k]['name']: v for k, v in tick.items()
+                }
             return {
                 map[k]: v for k, v in tick.items()
             }
 
         unit_class = self.__class__._unit
+        results = {}
+        if 'ticks' in raw:
+            results = raw['ticks']
+        else:
+            results = raw['results']
         super().__init__([
-            unit_class(rename_keys(tick, raw['map']))
-            for tick in raw['ticks']
+            unit_class(rename_keys(result, raw['map']))
+            for result in results
         ])
         self._raw = raw
 
@@ -172,16 +192,32 @@ class _TradesOrQuotes(object):
         if not hasattr(self, '_df'):
             raw = self._raw
             columns = self.__class__._columns
+            results = {}
+            if 'ticks' in raw:
+                results = raw['ticks']
+            else:
+                results = raw['results']
             df = pd.DataFrame(
-                sorted(raw['ticks'], key=lambda d: d['t']),
+                sorted(results, key=lambda d: d['t']),
                 columns=columns,
             )
-            df.columns = [raw['map'][c] for c in df.columns]
-            df.set_index('timestamp', inplace=True)
-            df.index = pd.to_datetime(
-                df.index.astype('int64') * 1000000,
-                utc=True,
-            ).tz_convert(NY)
+            if type(raw['map']['t']) is dict:
+                # Must be v2 response
+                df.columns = [raw['map'][c]['name'] for c in df.columns]
+                df.set_index('sip_timestamp', inplace=True)
+                df.index = pd.to_datetime(
+                    df.index.astype('int64'),
+                    utc=True,
+                    unit='ns',
+                ).tz_convert(NY)
+            else:
+                df.columns = [raw['map'][c] for c in df.columns]
+                df.set_index('timestamp', inplace=True)
+                df.index = pd.to_datetime(
+                    df.index.astype('int64'),
+                    utc=True,
+                    unit='ms',
+                ).tz_convert(NY)
 
             df.sort_index(inplace=True)
             self._df = df
@@ -198,12 +234,23 @@ class Trades(_TradesOrQuotes, list):
     _unit = Trade
 
 
+class TradesV2(_TradesOrQuotes, list):
+    _columns = ('t', 'y', 'f', 'q', 'i', 'x', 's', 'c', 'p', 'z')
+    _unit = Trade
+
+
 class Quote(_TradeOrQuote, Entity):
     pass
 
 
 class Quotes(_TradesOrQuotes, list):
     _columns = ('t', 'c', 'bE', 'aE', 'aP', 'bP', 'bS', 'aS')
+    _unit = Quote
+
+
+class QuotesV2(_TradesOrQuotes, list):
+    _columns = ('t', 'y', 'f', 'q', 'c', 'i', 'p', 'x', 's', 'P', 'X',
+                'S', 'z')
     _unit = Quote
 
 
@@ -273,3 +320,44 @@ class NewsList(EntityList):
 
 class Ticker(Entity):
     pass
+
+
+class DailyOpenClose(Entity):
+    pass
+
+
+trade_mapping = {
+    "sym": "symbol",
+    "c": "conditions",
+    "x": "exchange",
+    "p": "price",
+    "s": "size",
+    "t": "timestamp"
+}
+
+quote_mapping = {
+    "sym": "symbol",
+    "ax": "askexchange",
+    "ap": "askprice",
+    "as": "asksize",
+    "bx": "bidexchange",
+    "bp": "bidprice",
+    "bs": "bidsize",
+    "c": "condition",
+    "t": "timestamp"
+}
+
+agg_mapping = {
+    "sym": "symbol",
+    "o": "open",
+    "c": "close",
+    "h": "high",
+    "l": "low",
+    "a": "average",
+    "x": "exchange",
+    "v": "volume",
+    "s": "start",
+    "e": "end",
+    "vw": "vwap",
+    "av": "totalvolume",
+}

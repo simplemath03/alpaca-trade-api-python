@@ -1,5 +1,5 @@
 from alpaca_trade_api.stream2 import StreamConn
-from alpaca_trade_api.polygon.stream2 import StreamConn as PolyStream
+from alpaca_trade_api.polygon import StreamConn as PolyStream
 from alpaca_trade_api.entity import Account
 import asyncio
 import json
@@ -43,6 +43,7 @@ def test_stream(websockets):
     }).encode())
 
     conn = StreamConn('key-id', 'secret-key')
+    conn = conn.trading_ws
     conn._consume_msg = AsyncMock()
 
     @conn.on('authorized')
@@ -77,64 +78,55 @@ def test_stream(websockets):
     async def on_raise(conn, stream, msg):
         raise TestException()
 
-    with pytest.raises(TestException):
-        _run(conn._consume_msg())
-    assert ws.close.mock.called
-
     # _ensure_polygon
-    conn = StreamConn('key-id', 'secret-key')
     with mock.patch('alpaca_trade_api.stream2.polygon') as polygon:
         polygon.StreamConn().connect = AsyncMock()
-        _run(conn._ensure_polygon())
-        assert conn.polygon is not None
-        assert conn.polygon.connect.mock.called
+        polygon.StreamConn()._handlers = None
+
+        conn = StreamConn('key-id', 'secret-key', data_stream='polygon')
+        _run(conn._ensure_ws(conn.data_ws))
+        assert conn.data_ws is not None
+        assert conn.data_ws.connect.mock.called
 
     # _ensure_ws
     conn = StreamConn('key-id', 'secret-key')
-    conn._connect = AsyncMock()
-    _run(conn._ensure_ws())
-    assert conn._connect.mock.called
-    assert conn._ws is not None
+    conn.trading_ws._connect = AsyncMock()
+    _run(conn._ensure_ws(conn.trading_ws))
+    assert conn.trading_ws._connect.mock.called
 
     # subscribe
-    conn = StreamConn('key-id', 'secret-key')
+    conn = StreamConn('key-id', 'secret-key').trading_ws
     conn._ensure_ws = AsyncMock()
     conn._ws = mock.Mock()
     conn._ws.send = AsyncMock()
     conn._ensure_nats = AsyncMock()
-    conn.polygon = mock.Mock()
-    conn.polygon.subscribe = AsyncMock()
 
     _run(conn.subscribe(['Q.*', 'account_updates']))
     assert conn._ws.send.mock.called
-    assert conn.polygon.subscribe.mock.called
 
     # close
-    conn = StreamConn('key-id', 'secret-key')
+    conn = StreamConn('key-id', 'secret-key').trading_ws
     conn._ws = mock.Mock()
     conn._ws.close = AsyncMock()
-    conn.polygon = mock.Mock()
-    conn.polygon.close = AsyncMock()
     _run(conn.close())
-    assert conn._ws.close.mock.called
-    assert conn.polygon.close.mock.called
+    assert conn._ws is None
 
     # _cast
-    conn = StreamConn('key-id', 'secret-key')
+    conn = StreamConn('key-id', 'secret-key').trading_ws
     ent = conn._cast('account_updates', {})
     assert isinstance(ent, Account)
     ent = conn._cast('other', {'key': 'value'})
     assert ent.key == 'value'
 
     # polygon _dispatch
-    conn = StreamConn('key-id', 'secret-key')
-    conn.polygon = PolyStream('key-id')
+    conn = StreamConn('key-id', 'secret-key', data_stream='polygon')
+    conn.data_ws = PolyStream('key-id')
     msg_data = {'key': 'value', 'ev': 'Q'}
-    conn.polygon._cast = mock.Mock(return_value=msg_data)
+    conn.data_ws._cast = mock.Mock(return_value=msg_data)
 
     @conn.on('Q')
     async def on_q(conn, subject, data):
         on_q.data = data
 
-    _run(conn.polygon._dispatch(msg_data))
+    _run(conn.data_ws._dispatch(msg_data))
     assert on_q.data['key'] == 'value'

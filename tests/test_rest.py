@@ -6,8 +6,12 @@ import pytest
 import requests_mock
 
 
-if 'APCA_API_BASE_URL' in os.environ:
-    del os.environ['APCA_API_BASE_URL']
+@pytest.fixture(autouse=True)
+def delete_base_url_envs():
+    if 'APCA_API_BASE_URL' in os.environ:
+        del os.environ['APCA_API_BASE_URL']
+    if 'APCA_API_DATA_URL' in os.environ:
+        del os.environ['APCA_API_DATA_URL']
 
 
 @pytest.fixture
@@ -331,6 +335,313 @@ def test_data(reqmock):
     assert barset['AAPL'][0].t.day == 23
     assert barset['AAPL'].df.index[0].day == 23
 
+    # Aggs
+    reqmock.get(
+        'https://data.alpaca.markets/v1/aggs/ticker/AAPL/'
+        'range/1/day/2020-02-10/2020-02-12',
+        text='''
+        {
+            "ticker": "AAPL",
+            "status": "OK",
+            "adjusted": true,
+            "queryCount": 3,
+            "resultsCount": 3,
+            "results": [
+                {
+                    "v": 23748626,
+                    "o": 314.18,
+                    "c": 321.54,
+                    "h": 321.54,
+                    "l": 313.85,
+                    "t": 1581310800000,
+                    "n": 1
+                },
+                {
+                    "v": 21107108,
+                    "o": 323.6,
+                    "c": 319.61,
+                    "h": 323.9,
+                    "l": 318.71,
+                    "t": 1581397200000,
+                    "n": 1
+                },
+                {
+                    "v": 24425223,
+                    "o": 321.62,
+                    "c": 327.2,
+                    "h": 327.21,
+                    "l": 321.47,
+                    "t": 1581483600000,
+                    "n": 1
+                }
+            ]
+        }'''
+    )
+    aggs = api.get_aggs('AAPL', 1, 'day', '2020-02-10', '2020-02-12')
+    assert len(aggs) == 3
+    assert aggs[0].open == 314.18
+    assert aggs.df.iloc[1].high == 323.9
+    with pytest.raises(AttributeError):
+        aggs[2].foo
+
+    # Last trade
+    reqmock.get(
+        'https://data.alpaca.markets/v1/last/stocks/AAPL',
+        text='''
+        {
+            "status": "success",
+            "symbol": "AAPL",
+            "last": {
+                "price": 159.59,
+                "size": 20,
+                "exchange": 11,
+                "cond1": 14,
+                "cond2": 16,
+                "cond3": 0,
+                "cond4": 0,
+                "timestamp": 1518101436000900000
+            }
+        }
+        '''
+    )
+    trade = api.get_last_trade('AAPL')
+    assert trade.price == 159.59
+    assert trade.timestamp.day == 8
+
+    # Last quote
+    reqmock.get(
+        'https://data.alpaca.markets/v1/last_quote/stocks/AAPL',
+        text='''
+        {
+            "status": "success",
+            "symbol": "AAPL",
+            "last": {
+                "askprice": 159.59,
+                "asksize": 2,
+                "askexchange": 11,
+                "bidprice": 159.45,
+                "bidsize": 20,
+                "bidexchange": 12,
+                "timestamp": 1518101436000900000
+            }
+        }'''
+    )
+
+    quote = api.get_last_quote('AAPL')
+    assert quote.askprice == 159.59
+    assert quote.timestamp.day == 8
+
+
+def test_watchlists(reqmock):
+    api = tradeapi.REST('key-id', 'secret-key', api_version='v1')
+    # get watchlists
+    reqmock.get(
+        'https://api.alpaca.markets/v1/watchlists',
+        text='''[
+    {
+        "id": "900e20b1-46eb-492b-a505-2ea67386b5fd",
+        "account_id": "1f893862-13b5-4603-b3ca-513980c00c6e",
+        "created_at": "2019-10-31T01:45:41.308091Z",
+        "updated_at": "2019-12-09T17:50:57.151693Z",
+        "name": "Primary Watchlist"
+    },
+    {
+        "id": "e65f2f2d-b596-4db6-bd68-1b7ceb77cccc",
+        "account_id": "1f893862-13b5-4603-b3ca-513980c00c6e",
+        "created_at": "2020-01-23T00:52:07.049138Z",
+        "updated_at": "2020-01-23T00:57:27.063889Z",
+        "name": "dev"
+    },
+    {
+        "id": "e7574813-a853-4536-a52b-b47cc25def14",
+        "account_id": "1f893862-13b5-4603-b3ca-513980c00c6e",
+        "created_at": "2020-01-23T01:36:25.807997Z",
+        "updated_at": "2020-01-23T01:36:25.807997Z",
+        "name": "prod"
+    }
+    ]''')
+    watchlists = api.get_watchlists()
+    assert watchlists[0].name == 'Primary Watchlist'
+    assert watchlists[1].id == 'e65f2f2d-b596-4db6-bd68-1b7ceb77cccc'
+    assert watchlists[2].account_id == '1f893862-13b5-4603-b3ca-513980c00c6e'
+
+    # get a watchlist by watchlist_id
+    watchlist_id = "e65f2f2d-b596-4db6-bd68-1b7ceb77cccc"
+    symbol = "AMD"
+    reqmock.get(
+        'https://api.alpaca.markets/v1/watchlists/{}'.format(watchlist_id),
+        text='''{
+            "id": "e65f2f2d-b596-4db6-bd68-1b7ceb77cccc",
+            "account_id": "1f893862-13b5-4603-b3ca-513980c00c6e",
+            "created_at": "2020-01-23T00:52:07.049138Z",
+            "updated_at": "2020-01-23T00:57:27.063889Z",
+            "name": "Primary Watchlist",
+            "assets": [
+        {
+            "id": "03fb07bb-5db1-4077-8dea-5d711b272625",
+            "class": "us_equity",
+            "exchange": "NASDAQ",
+            "symbol": "AMD",
+            "name": "",
+            "status": "active",
+            "tradable": true,
+            "marginable": true,
+            "shortable": true,
+            "easy_to_borrow": true
+        },
+        {
+            "id": "4ce9353c-66d1-46c2-898f-fce867ab0247",
+            "class": "us_equity",
+            "exchange": "NASDAQ",
+            "symbol": "NVDA",
+            "name": "",
+            "status": "active",
+            "tradable": true,
+            "marginable": true,
+            "shortable": true,
+            "easy_to_borrow": true
+        },
+        {
+            "id": "bb2a26c0-4c77-4801-8afc-82e8142ac7b8",
+            "class": "us_equity",
+            "exchange": "NASDAQ",
+            "symbol": "NFLX",
+            "name": "",
+            "status": "active",
+            "tradable": true,
+            "marginable": true,
+            "shortable": true,
+            "easy_to_borrow": true
+        },
+        {
+            "id": "24cbba8c-831b-44e2-8503-dd0c2ed7af8f",
+            "class": "us_equity",
+            "exchange": "NASDAQ",
+            "symbol": "PYPL",
+            "name": "",
+            "status": "active",
+            "tradable": true,
+            "marginable": true,
+            "shortable": true,
+            "easy_to_borrow": true
+        }
+    ]
+    }''')
+    watchlist = api.get_watchlist(watchlist_id)
+    assert watchlist.name == 'Primary Watchlist'
+    assert len(watchlist.assets) == 4
+    assert watchlist.assets[0]["id"] == "03fb07bb-5db1-4077-8dea-5d711b272625"
+    assert watchlist.assets[0]["class"] == "us_equity"
+    assert watchlist.assets[0]["exchange"] == "NASDAQ"
+    assert watchlist.assets[0]["symbol"] == "AMD"
+    assert watchlist.assets[0]["name"] == ""
+    assert watchlist.assets[0]["status"] == "active"
+    assert watchlist.assets[0]["tradable"]
+    assert watchlist.assets[0]["marginable"]
+    assert watchlist.assets[0]["shortable"]
+    assert watchlist.assets[0]["easy_to_borrow"]
+
+    # add an asset to a watchlist
+    reqmock.post(
+        'https://api.alpaca.markets/v1/watchlists/{}'.format(watchlist_id),
+        text='''{
+            "id": "e65f2f2d-b596-4db6-bd68-1b7ceb77cccc",
+            "account_id": "1f893862-13b5-4603-b3ca-513980c00c6e",
+            "created_at": "2020-01-23T00:52:07.049138Z",
+            "updated_at": "2020-01-23T00:57:27.063889Z",
+            "name": "Primary Watchlist",
+            "assets": [
+        {
+            "id": "03fb07bb-5db1-4077-8dea-5d711b272625",
+            "class": "us_equity",
+            "exchange": "NASDAQ",
+            "symbol": "AMD",
+            "name": "",
+            "status": "active",
+            "tradable": true,
+            "marginable": true,
+            "shortable": true,
+            "easy_to_borrow": true
+        }
+    ]
+    }''')
+    watchlist = api.add_to_watchlist(watchlist_id, symbol="AMD")
+    assert watchlist.name == 'Primary Watchlist'
+    assert len(watchlist.assets) == 1
+    assert watchlist.assets[0]["symbol"] == "AMD"
+
+    # remove an item from a watchlist
+    reqmock.delete(
+        'https://api.alpaca.markets/v1/watchlists/{}/{}'.format(
+            watchlist_id, symbol
+        ),
+        text='''{
+    "id": "e65f2f2d-b596-4db6-bd68-1b7ceb77cccc",
+    "account_id": "1f893862-13b5-4603-b3ca-513980c00c6e",
+    "created_at": "2020-01-23T00:52:07.049138Z",
+    "updated_at": "2020-01-23T00:57:27.063889Z",
+    "name": "dev",
+    "assets": [
+        {
+            "id": "03fb07bb-5db1-4077-8dea-5d711b272625",
+            "class": "us_equity",
+            "exchange": "NASDAQ",
+            "symbol": "AMD",
+            "name": "",
+            "status": "active",
+            "tradable": true,
+            "marginable": true,
+            "shortable": true,
+            "easy_to_borrow": true
+        },
+        {
+            "id": "4ce9353c-66d1-46c2-898f-fce867ab0247",
+            "class": "us_equity",
+            "exchange": "NASDAQ",
+            "symbol": "NVDA",
+            "name": "",
+            "status": "active",
+            "tradable": true,
+            "marginable": true,
+            "shortable": true,
+            "easy_to_borrow": true
+        },
+        {
+            "id": "bb2a26c0-4c77-4801-8afc-82e8142ac7b8",
+            "class": "us_equity",
+            "exchange": "NASDAQ",
+            "symbol": "NFLX",
+            "name": "",
+            "status": "active",
+            "tradable": true,
+            "marginable": true,
+            "shortable": true,
+            "easy_to_borrow": true
+        },
+        {
+            "id": "24cbba8c-831b-44e2-8503-dd0c2ed7af8f",
+            "class": "us_equity",
+            "exchange": "NASDAQ",
+            "symbol": "PYPL",
+            "name": "",
+            "status": "active",
+            "tradable": true,
+            "marginable": true,
+            "shortable": true,
+            "easy_to_borrow": true
+        }
+    ]
+    }''')
+    api.delete_from_watchlist(watchlist_id, symbol)
+
+    # delete a watchlist
+    reqmock.delete(
+        'https://api.alpaca.markets/v1/watchlists/{}'.format(watchlist_id),
+        text='',
+        status_code=204,
+    )
+    api.delete_watchlist(watchlist_id)
+
 
 def test_errors(reqmock):
     api = tradeapi.REST('key-id', 'secret-key', api_version='v1')
@@ -395,3 +706,10 @@ def test_errors(reqmock):
         assert err.response.status_code == err.status_code
     else:
         assert False
+
+
+def test_no_resource_warning_with_context_manager():
+    with pytest.warns(None) as record:  # ensure no warnings are raised
+        with tradeapi.REST('key-id', 'secret-key', api_version='v1') as api:
+            assert api
+    assert not record

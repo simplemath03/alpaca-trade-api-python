@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import ast
+import os
 import re
 from setuptools import setup
 
@@ -13,6 +14,13 @@ with open('alpaca_trade_api/__init__.py', 'rb') as f:
 with open('README.md') as readme_file:
     README = readme_file.read()
 
+with open(os.path.join("requirements", "requirements.txt")) as reqs:
+    REQUIREMENTS = reqs.readlines()
+
+with open(os.path.join("requirements", "requirements_test.txt")) as reqs:
+    REQUIREMENTS_TEST = reqs.readlines()
+
+
 setup(
     name='alpaca-trade-api',
     version=version,
@@ -23,22 +31,12 @@ setup(
     author_email='oss@alpaca.markets',
     url='https://github.com/alpacahq/alpaca-trade-api-python',
     keywords='financial,timeseries,api,trade',
-    packages=['alpaca_trade_api', 'alpaca_trade_api.polygon'],
-    install_requires=[
-        'asyncio-nats-client',
-        'pandas',
-        'requests',
-        'urllib3<1.25',
-        'websocket-client',
-        'websockets>=8.0',
+    packages=[
+        'alpaca_trade_api',
+        'alpaca_trade_api.polygon',
+        'alpaca_trade_api.alpha_vantage',
     ],
-    tests_require=[
-        'pytest',
-        'pytest-cov',
-        'requests-mock',
-        'coverage>=4.4.1',
-        'mock>=1.0.1',
-        'flake8',
-    ],
+    install_requires=REQUIREMENTS,
+    tests_require=REQUIREMENTS_TEST,
     setup_requires=['pytest-runner', 'flake8'],
 )
